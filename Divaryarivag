@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>دیوار روستا - یک فایل</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  body{font-family:sans-serif;max-width:900px;margin:18px auto;padding:12px}
+  h1{margin-bottom:6px}
+  button{padding:8px 12px;margin:6px 4px;cursor:pointer}
+  input,textarea{width:100%;padding:8px;margin:6px 0;box-sizing:border-box}
+  .row{display:flex;gap:8px;flex-wrap:wrap}
+  .card{border:1px solid #e0e0e0;border-radius:8px;padding:10px;margin:10px 0;background:#fafafa}
+  img.thumb{width:120px;height:auto;border-radius:6px;margin:4px}
+  .muted{color:#666;font-size:13px}
+  .progress{height:8px;background:#eee;border-radius:6px;overflow:hidden;margin-top:6px}
+  .bar{height:100%;background:#4caf50;width:0%}
+  .flex-between{display:flex;justify-content:space-between;align-items:center}
+</style>
+</head>
+<body>
+
+<h1>دیوار روستا — نسخه ساده</h1>
+<p class="muted">ثبت آگهی: حداکثر ۳ عکس، قیمت و توضیحات</p>
+
+<div id="controls" class="card">
+  <div class="flex-between">
+    <div>
+      <button id="btnShowForm">📌 ثبت آگهی</button>
+      <button id="btnShowList">📋 مشاهده آگهی‌ها</button>
+    </div>
+    <div class="muted">فقط برای پروژه‌ی کوچک و محلی</div>
+  </div>
+</div>
+
+<div id="formArea" class="card" style="display:none">
+  <h3>ثبت آگهی جدید</h3>
+
+  <label>قیمت (تومان)</label>
+  <input id="price" type="number" placeholder="مثال: 120000">
+
+  <label>توضیحات</label>
+  <textarea id="desc" rows="4" placeholder="توضیحات آگهی..."></textarea>
+
+  <label>انتخاب عکس‌ها (حداکثر 3)</label>
+  <input id="files" type="file" accept="image/*" multiple>
+
+  <div id="preview" class="row"></div>
+
+  <div id="uploadProgress" style="display:none;">
+    <div class="muted">در حال آپلود تصاویر...</div>
+    <div class="progress"><div class="bar" id="globalBar"></div></div>
+  </div>
+
+  <div style="margin-top:10px;">
+    <button id="btnUpload">ثبت و آپلود</button>
+    <button id="btnCancel">انصراف</button>
+  </div>
+
+  <p class="muted">نکته: فایل‌ها روی imgbb آپلود می‌شوند و لینک‌ها در Firebase ذخیره می‌گردند.</p>
+</div>
+
+<div id="listArea" class="card" style="display:none">
+  <h3>آگهی‌ها</h3>
+  <div id="adsList"></div>
+  <div id="emptyMsg" class="muted"></div>
+</div>
+
+<!-- Firebase (نسخه 8 ساده) -->
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.0/firebase-database.js"></script>
+
+<script>
+/* ========== تنظیمات: این‌ها را با مقادیر خودت جایگزین کن ========== */
+const IMGBB_KEY = "https://i.ibb.co/zVbKXspj/68c0797d2e4b43cec3e90539.jpg";
+
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDrw4BGlqE73KzqfvlffD5njbK_HZWJP0s",
+  authDomain: "yarivag-sity.firebaseapp.com",
+  projectId: "yarivag-sity",
+  storageBucket: "yarivag-sity.firebasestorage.app",
+  messagingSenderId: "481949392702",
+  appId: "1:481949392702:web:bba54ec37dc19e6db4166f",
+  measurementId: "G-WMY8E6WY6F"
+};
+/* ================================================================== */
+
+/* initialize firebase */
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
+/* المان‌ها */
+const btnShowForm = document.getElementById('btnShowForm');
+const btnShowList = document.getElementById('btnShowList');
+const formArea = document.getElementById('formArea');
+const listArea = document.getElementById('listArea');
+const btnCancel = document.getElementById('btnCancel');
+const btnUpload = document.getElementById('btnUpload');
+const filesInput = document.getElementById('files');
+const preview = document.getElementById('preview');
+const adsList = document.getElementById('adsList');
+const priceInput = document.getElementById('price');
+const descInput = document.getElementById('desc');
+const uploadProgress = document.getElementById('uploadProgress');
+const globalBar = document.getElementById('globalBar');
+const emptyMsg = document.getElementById('emptyMsg');
+
+btnShowForm.onclick = ()=>{ showForm(); }
+btnShowList.onclick = ()=>{ showList(); loadAds(); }
+btnCancel.onclick = ()=>{ hideAll(); }
+filesInput.onchange = renderPreview;
+btnUpload.onclick = handleSubmit;
+
+function showForm(){
+  formArea.style.display='block';
+  listArea.style.display='none';
+  preview.innerHTML='';
+}
+function showList(){
+  formArea.style.display='none';
+  listArea.style.display='block';
+}
+function hideAll(){
+  formArea.style.display='none';
+  listArea.style.display='none';
+}
+
+/* نمایش پیش‌نمایش تصاویر */
+function renderPreview(){
+  preview.innerHTML='';
+  const files = Array.from(filesInput.files).slice(0,3);
+  files.forEach(f=>{
+    const url = URL.createObjectURL(f);
+    const img = document.createElement('img');
+    img.src = url; img.className='thumb';
+    preview.appendChild(img);
+  });
+  if(filesInput.files.length>3){
+    alert("حداکثر ۳ تصویر مجاز است. تصاویر اضافه نادیده گرفته می‌شوند.");
+  }
+}
+
+/* آپلود یک تصویر به imgbb */
+async function uploadToImgbb(file){
+  const form = new FormData();
+  form.append('image', file);
+  // optional: name, expiration
+  const url = `https://api.imgbb.com/1/upload?key=${encodeURIComponent(IMGBB_KEY)}`;
+  const res = await fetch(url, { method: 'POST', body: form });
+  if(!res.ok){
+    const txt = await res.text();
+    throw new Error('خطا در آپلود imgbb: '+txt);
+  }
+  const j = await res.json();
+  return j.data.url; // direct image url
+}
+
+/* مدیریت ارسال آگهی */
+async function handleSubmit(){
+  const price = priceInput.value.trim();
+  const desc = descInput.value.trim();
+  const filesArr = Array.from(filesInput.files).slice(0,3);
+
+  if(!price || !desc){
+    alert("لطفاً قیمت و توضیحات را وارد کنید.");
+    return;
+  }
+
+  // شروع آپلود
+  uploadProgress.style.display='block';
+  globalBar.style.width='0%';
+
+  try{
+    const total = filesArr.length || 1;
+    const urls = [];
+    for(let i=0;i<filesArr.length;i++){
+      const file = filesArr[i];
+      // آپلود هر عکس
+      const imageUrl = await uploadToImgbb(file);
+      urls.push(imageUrl);
+      // بروزرسانی progress
+      const perc = Math.round(((i+1)/total)*100);
+      globalBar.style.width = perc + '%';
+    }
+
+    // اگر هیچ عکسی نبود، urls = []
+    const ad = {
+      price: price,
+      desc: desc,
+      images: urls,
+      created: Date.now()
+    };
+
+    // ذخیره در firebase (Realtime Database)
+    await db.ref('ads').push(ad);
+
+    alert('آگهی با موفقیت ثبت شد ✅');
+    // ریست فرم
+    priceInput.value=''; descInput.value=''; filesInput.value=''; preview.innerHTML='';
+
+    globalBar.style.width='100%';
+    setTimeout(()=>{ uploadProgress.style.display='none'; globalBar.style.width='0%'; }, 700);
+
+    // برو به لیست آگهی‌ها
+    showList();
+    loadAds();
+
+  }catch(err){
+    console.error(err);
+    alert('خطا: '+ (err.message || err));
+    uploadProgress.style.display='none';
+    globalBar.style.width='0%';
+  }
+}
+
+/* دریافت و نمایش آگهی‌ها */
+function loadAds(){
+  adsList.innerHTML = 'در حال دریافت...';
+  db.ref('ads').orderByChild('created').on('value', snap=>{
+    const data = snap.val();
+    adsList.innerHTML = '';
+    if(!data){
+      emptyMsg.textContent = 'هیچ آگهی‌ای ثبت نشده است.';
+      return;
+    } else {
+      emptyMsg.textContent = '';
+    }
+    // تبدیل به آرایه و مرتب سازی نزولی بر اساس زمان
+    const arr = Object.keys(data).map(k => ({ key:k, ...data[k] }))
+                  .sort((a,b)=> b.created - a.created);
+    arr.forEach(ad => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      const imgsHtml = (ad.images||[]).map(u => `<img class="thumb" src="${u}" loading="lazy">`).join('');
+      card.innerHTML = `
+        <div class="row">${imgsHtml}</div>
+        <div style="margin-top:6px;"><b>${ad.price} تومان</b></div>
+        <div style="margin-top:6px;">${escapeHtml(ad.desc)}</div>
+        <div class="muted" style="margin-top:6px;font-size:12px">${new Date(ad.created).toLocaleString()}</div>
+      `;
+      adsList.appendChild(card);
+    });
+  }, err=> {
+    console.error(err);
+    adsList.innerHTML = '<div class="muted">خطا در دریافت آگهی‌ها</div>';
+  });
+}
+
+/* امن‌سازی متن قبل از نمایش (خیلی ساده) */
+function escapeHtml(s){
+  if(!s) return '';
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* حالت پیش‌فرض: نمایش لیست */
+showList();
+loadAds();
+</script>
+
+</body>
+</html>
